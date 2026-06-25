@@ -186,3 +186,43 @@ def test_ingest_financial_endpoint():
         os.remove(file_path)
     if os.path.exists(os.path.dirname(file_path)):
         os.rmdir(os.path.dirname(file_path))
+
+def test_fuzzy_header_matching(tmp_path):
+    # Setup mock CSV contents with synonym/aliased headers
+    csv_data = """Date,Sales,cogs,sg&a,Cash Inflow,Cash Outflow,Assets,Liabilities,Equity,ending cash
+2025-Q1,1000000,300000,500000,1000000,1200000,5000000,2000000,2000000,600000"""
+    
+    file_path = tmp_path / "test_fuzzy_financials.csv"
+    file_path.write_text(csv_data)
+    
+    results = run_financial_analysis(str(file_path))
+    
+    assert "error" not in results
+    assert results["latest_revenue"] == 1000000.0
+    assert results["latest_debt_to_equity"] == 1.0
+    assert results["ebitda_margin"] == 0.20
+    assert results["cash_runway_months"] == 3.0
+
+def test_audit_log_trace(tmp_path):
+    csv_data = """Period,Revenue,CostOfGoodsSold,OperatingExpenses,CashInflow,CashOutflow,TotalAssets,TotalLiabilities,TotalEquity
+2025-Q1,1000000,300000,500000,1000000,1200000,5000000,2000000,2000000"""
+    
+    file_path = tmp_path / "test_audit_financials.csv"
+    file_path.write_text(csv_data)
+    
+    results = run_financial_analysis(str(file_path))
+    assert "audit_log" in results
+    audit_log = results["audit_log"]
+    assert len(audit_log) > 0
+    # Assert EBITDA trace matches
+    assert any("EBITDA = Revenue ($1,000,000.00)" in line for line in audit_log)
+    assert any("EBITDA Margin = EBITDA ($200,000.00) / Revenue ($1,000,000.00) = 20.00%" in line for line in audit_log)
+    assert any("Debt-to-Equity Ratio = TotalLiabilities ($2,000,000.00) / TotalEquity ($2,000,000.00) = 1.000" in line for line in audit_log)
+
+def test_api_degradation_alert():
+    # Pass an invalid ticker symbol to force yfinance API error and fallback alert
+    res = normalize_yfinance_data("INVALID_TICKER_XYZ_123")
+    assert res["degraded"] is True
+    assert "yfinance fetch failed" in res["sourcing_alert"]
+    assert len(res["audit_log"]) > 0
+

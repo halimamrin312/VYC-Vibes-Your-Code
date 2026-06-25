@@ -139,7 +139,16 @@ def normalize_yfinance_data(ticker_symbol: str) -> Dict[str, Any]:
     clean_ticker = ticker_symbol.strip().upper()
     if clean_ticker in YFINANCE_MOCK_DATABASE:
         logger.info(f"yfinance Cache Hit for '{clean_ticker}'")
-        return YFINANCE_MOCK_DATABASE[clean_ticker]
+        res = YFINANCE_MOCK_DATABASE[clean_ticker].copy()
+        res["degraded"] = False
+        res["sourcing_alert"] = None
+        res["audit_log"] = [
+            "EBITDA = Revenue - CostOfGoodsSold - OperatingExpenses (Mocked Cache Data)",
+            "EBITDA Margin = EBITDA / Revenue (Mocked Cache Data)",
+            "Debt-to-Equity Ratio = TotalLiabilities / TotalEquity (Mocked Cache Data)",
+            "Cash Runway = Cash / Average Monthly Cash Burn (Mocked Cache Data)"
+        ]
+        return res
 
     try:
         import yfinance as yf
@@ -219,7 +228,19 @@ def normalize_yfinance_data(ticker_symbol: str) -> Dict[str, Any]:
                 if prev > 0:
                     growth_history.append(round(((curr - prev) / prev) * 100, 2))
                     
+        # Generate mathematical audit log for live API data
+        audit_log = [
+            f"EBITDA = EBIT (${ebit:,.2f}) + Depreciation & Amortization (${da:,.2f}) = ${ebitda:,.2f}",
+            f"EBITDA Margin = EBITDA (${ebitda:,.2f}) / Revenue (${rev:,.2f}) = {ebitda_margin * 100:.2f}%" if rev > 0 else "EBITDA Margin = 0.00% (Revenue is zero)",
+            f"Debt-to-Equity Ratio = TotalLiabilities (${liab:,.2f}) / TotalEquity (${eq:,.2f}) = {debt_equity:.3f}",
+            f"Net Cash Flow = Operating Cash Flow (${operating_cf:,.2f}) - Capital Expenditure (${abs(capital_exp):,.2f}) = ${net_cash_flow:,.2f}",
+            f"Average Monthly Cash Burn = {f'${abs_burn:,.2f}' if net_cash_flow < 0 else '$0.00 (Positive cash flow)'}",
+            f"Cash Runway = Cash (${cash:,.2f}) / Average Monthly Cash Burn (${avg_monthly_burn:,.2f}) = {cash_runway} months" if avg_monthly_burn > 0 else "Cash Runway = Infinite (Positive Cash Flow)"
+        ]
+                    
         return {
+            "degraded": False,
+            "sourcing_alert": None,
             "period": period_str,
             "latest_revenue": float(rev),
             "latest_debt_to_equity": round(debt_equity, 3),
@@ -228,12 +249,15 @@ def normalize_yfinance_data(ticker_symbol: str) -> Dict[str, Any]:
             "interest_coverage_ratio": "No Interest Expense",
             "revenue_growth_history": growth_history,
             "cash_runway_months": cash_runway,
-            "raw_record_count": len(financials.columns)
+            "raw_record_count": len(financials.columns),
+            "audit_log": audit_log
         }
     except Exception as e:
         logger.warning(f"yfinance fetch failed for '{clean_ticker}': {e}. Falling back to stable mock.")
-        # Return fallback mock structured similarly to AAPL
+        # Return fallback mock structured similarly to AAPL with degraded flag
         return {
+            "degraded": True,
+            "sourcing_alert": f"yfinance fetch failed for '{clean_ticker}': {str(e)}. Falling back to peer benchmark data.",
             "period": "2024-12-31",
             "latest_revenue": 125000000.0,
             "latest_debt_to_equity": 1.25,
@@ -242,7 +266,14 @@ def normalize_yfinance_data(ticker_symbol: str) -> Dict[str, Any]:
             "interest_coverage_ratio": 5.4,
             "revenue_growth_history": [4.5, 6.2],
             "cash_runway_months": 15.0,
-            "raw_record_count": 3
+            "raw_record_count": 3,
+            "audit_log": [
+                "EBITDA = Revenue ($125,000,000.00) - Expenses ($102,500,000.00) = $22,500,000.00 (Mock calculation)",
+                "EBITDA Margin = EBITDA ($22,500,000.00) / Revenue ($125,000,000.00) = 18.00%",
+                "Debt-to-Equity Ratio = TotalLiabilities ($62,500,000.00) / TotalEquity ($50,000,000.00) = 1.250",
+                "Average Monthly Cash Burn = Mock Cash Outflow = $150,000.00",
+                "Cash Runway = Estimated Cash ($2,250,000.00) / Monthly Burn ($150,000.00) = 15.0 months"
+            ]
         }
 
 @register_agent("financial_auditor")
@@ -269,6 +300,8 @@ class FinancialAuditor:
             "industry_avg_debt_equity": 1.10
         }
         data_source = ""
+        sourcing_alerts = []
+        data_degraded = False
         
         # 2. Pipeline Routing
         if c_type == "public" and jurisdiction == "US":
@@ -280,6 +313,8 @@ class FinancialAuditor:
                 sec_findings = mcp_get_financials(cik)
             except Exception as e:
                 logger.error(f"SEC EDGAR lookup failed: {e}")
+                data_degraded = True
+                sourcing_alerts.append(f"SEC EDGAR lookup failed for '{target_company}': {e}. Loaded static benchmark.")
                 sec_findings = {
                     "cik": "0000320193",
                     "name": "Apple Inc. (Fallback US Benchmark)",
@@ -289,11 +324,17 @@ class FinancialAuditor:
             
             ticker_to_use = ticker or resolved.get("ticker", "AAPL")
             analysis = normalize_yfinance_data(ticker_to_use)
+            if analysis.get("degraded"):
+                data_degraded = True
+                sourcing_alerts.append(analysis.get("sourcing_alert"))
             
         elif c_type == "public":
             # Path B: Global Public Company (yfinance)
             data_source = "yfinance Global Scraper"
             analysis = normalize_yfinance_data(ticker or target_company)
+            if analysis.get("degraded"):
+                data_degraded = True
+                sourcing_alerts.append(analysis.get("sourcing_alert"))
             sec_findings = {
                 "cik": "N/A (Non-US Public)",
                 "name": "Yahoo Finance Index Benchmark",
@@ -334,7 +375,13 @@ class FinancialAuditor:
                 analysis = run_financial_analysis(csv_file)
                 if "error" in analysis:
                     return {
-                        "findings": {"status": "error", "error": analysis["error"], "flags": []},
+                        "findings": {
+                            "status": "error", 
+                            "error": analysis["error"], 
+                            "flags": [],
+                            "data_degraded": True,
+                            "sourcing_alerts": [f"CSV parsing failed: {analysis['error']}"]
+                        },
                         "markdown": f"### Financial Diligence Error\nFailed to parse target financials: {analysis['error']}"
                     }
                 sec_findings = {
@@ -355,7 +402,9 @@ class FinancialAuditor:
                         "status": "skipped",
                         "hitl_required": True,
                         "hitl_reason": hitl_reason,
-                        "flags": []
+                        "flags": [],
+                        "data_degraded": True,
+                        "sourcing_alerts": [hitl_reason]
                     },
                     "markdown": f"### Financial Diligence: {target_company} (PAUSED)\n"
                                 f"⚠️ **Swarm Paused**: Private company pipeline selected. Target has no public disclosures on SEC EDGAR or yfinance.\n\n"
@@ -364,6 +413,10 @@ class FinancialAuditor:
 
         # 3. LLM Qualitative Audit Report Synthesis
         system_prompt = load_financial_system_prompt()
+        
+        audit_log = analysis.get("audit_log", [])
+        audit_log_str = "\n".join(audit_log)
+        sourcing_alerts_str = "; ".join(sourcing_alerts) if sourcing_alerts else "None"
         
         user_prompt = f"""
 We are auditing target company: '{target_company}' (Industry Sector: '{self.industry}').
@@ -382,12 +435,23 @@ Sector Comparison Benchmarks:
 - Reference CIK: {sec_findings.get('cik', 'N/A')}
 - Industry Average Debt-to-Equity: {sec_findings.get('industry_avg_debt_equity', 1.10)}
 
+Data Degradation Status:
+- Data Degraded: {data_degraded}
+- Sourcing Alerts: {sourcing_alerts_str}
+
+Mathematical Audit Trail:
+{audit_log_str}
+
 Please perform a professional financial due diligence audit:
-1. Benchmark the target parameters against industry reference values.
-2. Flag any critical risk items.
-3. If the debt-to-equity ratio is above 2.0, you MUST explicitly state in your analysis that a Human-in-the-Loop (HITL) intervention is required due to extreme debt leverage.
-4. Explain how target data was sourced (source path: {data_source}).
-5. Output your report in markdown. End your response with a JSON-formatted block wrapped in ```json ... ``` that specifies:
+1. If Data Degraded is True, you MUST start your report with a prominent yellow markdown warning alert block:
+> [!WARNING]
+> **Data Degraded / Sourced from Fallbacks**: {sourcing_alerts_str}
+2. Benchmark the target parameters against industry reference values.
+3. Flag any critical risk items.
+4. If the debt-to-equity ratio is above 2.0, you MUST explicitly state in your analysis that a Human-in-the-Loop (HITL) intervention is required due to extreme debt leverage.
+5. Explain how target data was sourced (source path: {data_source}).
+6. You MUST include a section `### Mathematical Audit Trail` at the end of the report that shows the step-by-step mathematical calculation formulas (EBITDA, EBITDA Margin, Debt-to-Equity, Cash Runway) as blockquotes using the provided Mathematical Audit Trail text.
+7. Output your report in markdown. End your response with a JSON-formatted block wrapped in ```json ... ``` that specifies:
 {{
   "flags": [
     {{
@@ -441,7 +505,15 @@ Please perform a professional financial due diligence audit:
                 })
 
         if not markdown_report:
-            markdown_report = f"""### Financial Diligence: {target_company}
+            warning_header = ""
+            if data_degraded:
+                warning_header = f"> [!WARNING]\n> **Data Degraded / Sourced from Fallbacks**: {sourcing_alerts_str}\n\n"
+                
+            audit_trail_section = ""
+            if audit_log:
+                audit_trail_section = "\n\n### Mathematical Audit Trail\n" + "\n".join([f"> {line}" for line in audit_log])
+
+            markdown_report = f"""{warning_header}### Financial Diligence: {target_company}
 - **Data Source:** {data_source}
 - **Reporting Period:** {analysis['period']}
 - **Latest Revenue:** ${analysis['latest_revenue']:,}
@@ -450,6 +522,8 @@ Please perform a professional financial due diligence audit:
 - **Average Monthly Burn Rate:** ${analysis['avg_monthly_burn']:,}
 - **Interest Coverage:** {analysis['interest_coverage_ratio']}
 - **Cash Runway (Months):** {analysis['cash_runway_months']}
+
+{audit_trail_section}
 
 #### Risk Analysis & Flagged Findings
 """
@@ -467,7 +541,9 @@ Please perform a professional financial due diligence audit:
                 "flags": flags,
                 "hitl_required": hitl_required,
                 "hitl_reason": hitl_reason,
-                "source": data_source
+                "source": data_source,
+                "data_degraded": data_degraded,
+                "sourcing_alerts": sourcing_alerts
             },
             "markdown": markdown_report
         }
