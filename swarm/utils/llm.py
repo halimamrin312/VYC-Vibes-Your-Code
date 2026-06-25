@@ -34,13 +34,17 @@ def _get_client(provider: str, api_key: str) -> Any:
                 _llm_clients[cache_key] = anthropic.Anthropic(api_key=api_key)
         return _llm_clients[cache_key]
 
+thread_local = threading.local()
+
 def call_llm(system_prompt: str, prompt: str) -> Optional[str]:
     """
     Executes a text generation query to an LLM provider based on settings.
     If the provider SDK is missing or credentials are unconfigured, returns None.
     """
-    provider = (settings.model_provider or "").strip().lower()
-    model = (settings.model_name or "").strip()
+    provider = getattr(thread_local, "model_provider", None) or settings.model_provider
+    provider = (provider or "").strip().lower()
+    model = getattr(thread_local, "model_name", None) or settings.model_name
+    model = (model or "").strip()
 
     logger.info(f"Initiating LLM call (Provider: {provider}, Model: {model})")
 

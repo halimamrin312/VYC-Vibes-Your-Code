@@ -148,8 +148,12 @@ class Orchestrator:
     def dispatch_agent(self, agent_name: str, context: Dict[str, Any]) -> AgentReport:
         """
         Instantiates and executes a registered sub-agent.
-        Includes robust error isolation to prevent individual agent crashes from halting the swarm.
+        Includes robust error isolation, automatic retries with exponential backoff,
+        and LLM provider fallbacks to prevent transient API failures.
         """
+        import time
+        from swarm.utils.llm import thread_local
+        
         agent_name_clean = agent_name.strip().lower()
         if agent_name_clean not in AGENT_REGISTRY:
             error_msg = f"Agent '{agent_name_clean}' not found in registry."
@@ -161,32 +165,74 @@ class Orchestrator:
                 raw_markdown=f"### Error\n{error_msg}"
             )
             
-        try:
-            agent_class = AGENT_REGISTRY[agent_name_clean]
-            # Initialize with sector/industry configuration if applicable
-            if hasattr(agent_class, "industry"):
-                agent_instance = agent_class(industry=self.state.industry_sector)
-            else:
-                agent_instance = agent_class()
-                
-            logger.info(f"Executing agent: {agent_name_clean}")
-            # Call standard execute method
-            result = agent_instance.execute(context)
+        # Determine fallback sequence based on available keys
+        fallbacks = []
+        if settings.gemini_api_key:
+            fallbacks.append(("gemini", settings.model_name or "gemini-2.5-flash"))
+        if settings.openai_api_key:
+            fallbacks.append(("openai", "gpt-4o"))
+        if settings.anthropic_api_key:
+            fallbacks.append(("anthropic", "claude-3-5-sonnet-20241022"))
             
-            return AgentReport(
-                agent_name=agent_name_clean,
-                status="success",
-                findings=result.get("findings", {}),
-                raw_markdown=result.get("markdown", "No report content generated.")
+        # Ensure the configured primary provider is tried first
+        primary_provider = settings.model_provider
+        primary_model = settings.model_name
+        try_configs = [(primary_provider, primary_model)]
+        for provider, model in fallbacks:
+            if provider != primary_provider:
+                try_configs.append((provider, model))
+                
+        max_retries = 3
+        last_exception = None
+        
+        for config_idx, (provider, model) in enumerate(try_configs):
+            thread_local.model_provider = provider
+            thread_local.model_name = model
+            
+            for retry in range(max_retries):
+                try:
+                    agent_class = AGENT_REGISTRY[agent_name_clean]
+                    if hasattr(agent_class, "industry"):
+                        agent_instance = agent_class(industry=self.state.industry_sector)
+                    else:
+                        agent_instance = agent_class()
+                        
+                    logger.info(f"Executing agent: {agent_name_clean} (Provider: {provider}, Model: {model}, Attempt: {retry + 1})")
+                    result = agent_instance.execute(context)
+                    
+                    thread_local.model_provider = None
+                    thread_local.model_name = None
+                    
+                    return AgentReport(
+                        agent_name=agent_name_clean,
+                        status="success",
+                        findings=result.get("findings", {}),
+                        raw_markdown=result.get("markdown", "No report content generated.")
+                    )
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(
+                        f"Execution attempt {retry + 1} failed for agent '{agent_name_clean}' using {provider}: {str(e)}. "
+                        f"Retrying in {2 ** retry}s..."
+                    )
+                    time.sleep(2 ** retry)
+            
+            logger.error(
+                f"All {max_retries} attempts failed for agent '{agent_name_clean}' using provider '{provider}'. "
+                f"Trying next fallback configuration if available..."
             )
-        except Exception as e:
-            logger.error(f"Execution failed for agent '{agent_name_clean}': {str(e)}", exc_info=True)
-            return AgentReport(
-                agent_name=agent_name_clean,
-                status="error",
-                findings={"error": str(e)},
-                raw_markdown=f"### Error in {agent_name_clean}\n{str(e)}"
-            )
+            
+        thread_local.model_provider = None
+        thread_local.model_name = None
+        
+        error_msg = f"All execution attempts and fallbacks failed for agent '{agent_name_clean}': {str(last_exception)}"
+        logger.error(error_msg, exc_info=True)
+        return AgentReport(
+            agent_name=agent_name_clean,
+            status="error",
+            findings={"error": error_msg},
+            raw_markdown=f"### Error in {agent_name_clean}\n{error_msg}"
+        )
             
     def run_loop(self, user_message: str) -> Generator[Dict[str, Any], None, None]:
         """
@@ -205,11 +251,12 @@ class Orchestrator:
         yield {"event": "status", "message": f"Analyzing due diligence parameters for {self.state.target_company}..."}
         
         # Determine active agents based on configuration
-        active_agents = ["financial_auditor", "legal_compliance", "ops_evaluator", "brand_sentiment"]
+        wave_1_agents = ["financial_auditor", "brand_sentiment"]
+        wave_2_agents = ["legal_compliance", "ops_evaluator"]
         
-        agents_to_run = []
-        for agent_name in active_agents:
-            # If agent has already run successfully, skip executing it on resume
+        # --- WAVE 1 EXECUTION ---
+        wave_1_to_run = []
+        for agent_name in wave_1_agents:
             if agent_name in self.state.agent_reports and self.state.agent_reports[agent_name].status in ("success", "skipped"):
                 logger.info(f"Agent {agent_name} already executed successfully. Loading cached result.")
                 yield {
@@ -219,30 +266,26 @@ class Orchestrator:
                     "message": f"Loaded completed {agent_name.replace('_', ' ').title()} audit from session state."
                 }
             else:
-                agents_to_run.append(agent_name)
-
-        if agents_to_run:
-            yield {"event": "status", "message": f"Initializing {len(agents_to_run)} sub-agents for concurrent execution..."}
+                wave_1_to_run.append(agent_name)
+                
+        if wave_1_to_run:
+            yield {"event": "status", "message": f"Initializing {len(wave_1_to_run)} Wave 1 sub-agents..."}
             
-            # Construct contexts with explicit AGENT_DATA_PATHS mapping (Flaw 4)
             agent_contexts = {}
-            for agent_name in agents_to_run:
+            for agent_name in wave_1_to_run:
                 agent_contexts[agent_name] = {
                     "target_company": self.state.target_company,
                     "session_id": self.state.session_id,
                     "data_room_path": AGENT_DATA_PATHS.get(agent_name, f"data_room/uploads/{agent_name.split('_')[0]}"),
                     "sensitive_terms": [self.state.target_company, "merger", "buyout", "acquisition"]
                 }
-            
-            # Execute sub-agents concurrently in a thread pool (Flaw 1)
+                
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            
-            yield {"event": "status", "message": "Executing active sub-agents in parallel threads..."}
             reports = {}
-            with ThreadPoolExecutor(max_workers=len(agents_to_run)) as executor:
+            with ThreadPoolExecutor(max_workers=len(wave_1_to_run)) as executor:
                 future_to_agent = {
                     executor.submit(self.dispatch_agent, name, agent_contexts[name]): name
-                    for name in agents_to_run
+                    for name in wave_1_to_run
                 }
                 for future in as_completed(future_to_agent):
                     agent_name = future_to_agent[future]
@@ -257,9 +300,8 @@ class Orchestrator:
                             findings={"error": str(e)},
                             raw_markdown=f"### Error in {agent_name}\n{str(e)}"
                         )
-
-            # Record reports and yield status updates
-            for agent_name in agents_to_run:
+            
+            for agent_name in wave_1_to_run:
                 report = reports[agent_name]
                 self.state.agent_reports[agent_name] = report
                 yield {
@@ -268,36 +310,147 @@ class Orchestrator:
                     "status": report.status,
                     "message": f"Finished {agent_name.replace('_', ' ').title()} audit."
                 }
-            
-            # Save session state to disk after execution results are populated
+                
             save_session(self.state)
             
-            # Check for critical red-flag triggers (Human-In-The-Loop Checkpoint - Flaw 1 & 3)
+            # Check for HITL flags in Wave 1
             hitl_agents = []
             hitl_reasons = []
-            
-            for agent_name in agents_to_run:
+            for agent_name in wave_1_to_run:
                 report = self.state.agent_reports[agent_name]
-                
-                # Robust check for CRITICAL flags
                 flags = report.findings.get("flags", [])
-                has_critical = False
-                for f in flags:
-                    if isinstance(f, dict) and f.get("severity") == "CRITICAL":
-                        has_critical = True
-                    elif isinstance(f, str) and f.upper() == "CRITICAL":
-                        has_critical = True
-                
+                has_critical = any(
+                    (isinstance(f, dict) and f.get("severity") == "CRITICAL") or
+                    (isinstance(f, str) and f.upper() == "CRITICAL")
+                    for f in flags
+                )
                 if report.findings.get("hitl_required") or has_critical:
                     hitl_agents.append(agent_name)
                     reason = report.findings.get("hitl_reason") or "Unspecified critical risk flagged."
-                    hitl_reasons.append(f"{agent_name.replace('_', ' ').title()}: {reason}")
-            
+                    hitl_reasons.append(f"{agent_name.replace('_', ' ').title()} Wave 1: {reason}")
+                    
             if hitl_agents:
                 self.state.hitl_status = "PAUSED"
                 self.state.pending_hitl_question = " | ".join(hitl_reasons)
                 save_session(self.state)
+                yield {
+                    "event": "hitl_pause",
+                    "payload": {
+                        "question": self.state.pending_hitl_question,
+                        "options": [
+                            {"key": "A", "text": "Halt due diligence process"},
+                            {"key": "B", "text": "Adjust valuation model and continue"},
+                            {"key": "C", "text": "Ignore and proceed"}
+                        ]
+                    }
+                }
+                return
+
+        # --- CONTEXT DISTILLATION ---
+        wave_1_context = {}
+        for agent_name in wave_1_agents:
+            report = self.state.agent_reports.get(agent_name)
+            if report:
+                findings_summary = report.findings.get("summary") or ""
+                if not findings_summary and report.raw_markdown:
+                    findings_summary = report.raw_markdown[:300]
                 
+                distilled = {
+                    "status": report.status,
+                    "summary": findings_summary,
+                    "findings": report.findings,
+                }
+                if agent_name == "financial_auditor":
+                    distilled.update({
+                        "latest_revenue": report.findings.get("latest_revenue"),
+                        "latest_debt_to_equity": report.findings.get("latest_debt_to_equity"),
+                        "avg_monthly_burn": report.findings.get("avg_monthly_burn"),
+                        "ebitda_margin": report.findings.get("ebitda_margin"),
+                        "cash_runway_months": report.findings.get("cash_runway_months"),
+                        "flags": report.findings.get("flags", [])
+                    })
+                wave_1_context[agent_name] = distilled
+
+        # --- WAVE 2 EXECUTION ---
+        wave_2_to_run = []
+        for agent_name in wave_2_agents:
+            if agent_name in self.state.agent_reports and self.state.agent_reports[agent_name].status in ("success", "skipped"):
+                logger.info(f"Agent {agent_name} already executed successfully. Loading cached result.")
+                yield {
+                    "event": "agent_status",
+                    "agent": agent_name,
+                    "status": self.state.agent_reports[agent_name].status,
+                    "message": f"Loaded completed {agent_name.replace('_', ' ').title()} audit from session state."
+                }
+            else:
+                wave_2_to_run.append(agent_name)
+                
+        if wave_2_to_run:
+            yield {"event": "status", "message": f"Initializing {len(wave_2_to_run)} Wave 2 sub-agents..."}
+            
+            agent_contexts = {}
+            for agent_name in wave_2_to_run:
+                agent_contexts[agent_name] = {
+                    "target_company": self.state.target_company,
+                    "session_id": self.state.session_id,
+                    "data_room_path": AGENT_DATA_PATHS.get(agent_name, f"data_room/uploads/{agent_name.split('_')[0]}"),
+                    "sensitive_terms": [self.state.target_company, "merger", "buyout", "acquisition"],
+                    "wave_1_context": wave_1_context
+                }
+                
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            reports = {}
+            with ThreadPoolExecutor(max_workers=len(wave_2_to_run)) as executor:
+                future_to_agent = {
+                    executor.submit(self.dispatch_agent, name, agent_contexts[name]): name
+                    for name in wave_2_to_run
+                }
+                for future in as_completed(future_to_agent):
+                    agent_name = future_to_agent[future]
+                    try:
+                        report = future.result()
+                        reports[agent_name] = report
+                    except Exception as e:
+                        logger.error(f"Agent {agent_name} generated an exception: {e}", exc_info=True)
+                        reports[agent_name] = AgentReport(
+                            agent_name=agent_name,
+                            status="error",
+                            findings={"error": str(e)},
+                            raw_markdown=f"### Error in {agent_name}\n{str(e)}"
+                        )
+            
+            for agent_name in wave_2_to_run:
+                report = reports[agent_name]
+                self.state.agent_reports[agent_name] = report
+                yield {
+                    "event": "agent_status",
+                    "agent": agent_name,
+                    "status": report.status,
+                    "message": f"Finished {agent_name.replace('_', ' ').title()} audit."
+                }
+                
+            save_session(self.state)
+            
+            # Check for HITL flags in Wave 2
+            hitl_agents = []
+            hitl_reasons = []
+            for agent_name in wave_2_to_run:
+                report = self.state.agent_reports[agent_name]
+                flags = report.findings.get("flags", [])
+                has_critical = any(
+                    (isinstance(f, dict) and f.get("severity") == "CRITICAL") or
+                    (isinstance(f, str) and f.upper() == "CRITICAL")
+                    for f in flags
+                )
+                if report.findings.get("hitl_required") or has_critical:
+                    hitl_agents.append(agent_name)
+                    reason = report.findings.get("hitl_reason") or "Unspecified critical risk flagged."
+                    hitl_reasons.append(f"{agent_name.replace('_', ' ').title()} Wave 2: {reason}")
+                    
+            if hitl_agents:
+                self.state.hitl_status = "PAUSED"
+                self.state.pending_hitl_question = " | ".join(hitl_reasons)
+                save_session(self.state)
                 yield {
                     "event": "hitl_pause",
                     "payload": {
