@@ -1,313 +1,154 @@
-# Legal Compliance Agent - Detailed Technical Specification
+# Legal Compliance Agent - Detailed Technical Specification & Documentation
 
-This document provides the complete, production-grade specification for implementing the **Legal Compliance Agent** within the M&A Due Diligence Swarm. It details local PDF text extraction, SentenceTransformer embeddings, FAISS storage indexing, and external CourtListener MCP integration.
+This document provides the complete, production-grade technical specification and documentation for the **Legal Compliance Agent** within the M&A Due Diligence Swarm. It has been updated to reflect the actual codebase implementation, covering local PDF text extraction, SentenceTransformer embeddings, FAISS storage indexing, Gemini AI clause analysis, external CourtListener & GovInfo integration, query sanitization, and the React frontend interface.
 
 ---
 
 ## 📂 Component Layout & File Locations
-- **Main Agent Code:** `swarm/agents/legal_compliance.py`
-- **RAG & Extraction Tool:** `swarm/tools/local_pdf_parser.py`
-- **FastAPI Endpoint:** `/api/ingest/legal` in `backend/app/routers/ingest.py`
-- **System Prompt Template:** `swarm/prompt_templates/legal_system.txt`
-- **Frontend Panel:** `frontend/src/components/LegalViewer.jsx`
+
+- **Main Agent Implementation:** [legal_compliance.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py) — Defines the orchestrator lifecycle, 10 legal query metrics (LQ-01 to LQ-10), severity adjustment, and final report generation.
+- **RAG & PDF Extraction Tool:** [local_pdf_parser.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py) — Extracts text from private contracts, splits it into semantic chunks, and builds/queries the local FAISS index.
+- **Data Sanitizer Tool:** [data_sanitizer.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/data_sanitizer.py) — Scrubs outbound query metadata to prevent corporate leakage of transaction intent.
+- **Gemini Clause Analyzer:** [gemini_clause_analyzer.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/gemini_clause_analyzer.py) — Orchestrates LLM-based verification of document chunks via `gemini-2.5-flash`.
+- **External API Clients:** [legal_api_clients.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py) — Integrates with CourtListener (dockets/litigation) and GovInfo (regulatory records) with mock fallback simulation capabilities.
+- **System Prompt Template:** [legal_system.txt](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/prompt_templates/legal_system.txt) — Holds standard corporate counsel agent behavioral directives.
+- **FastAPI Router:** [ingest.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/backend/app/routers/ingest.py) — Exposes `/api/ingest/legal` endpoint to receive PDF files, save them locally, and trigger vector ingestion.
+- **Frontend Panel:** [LegalViewer.jsx](file:///C:/Users/abdul/VYC-Vibes-Your-Code/frontend/src/components/LegalViewer.jsx) & [LegalViewer.css](file:///C:/Users/abdul/VYC-Vibes-Your-Code/frontend/src/components/LegalViewer.css) — Implements drag-and-drop document upload, real-time audit visualization, risk metrics, dockets, and HITL alerts.
+- **Testing Framework:** [test_legal.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/tests/test_legal.py) — Verifies chunk boundaries, agent execution pipeline, sanitization, mock API services, and Gemini parser functions.
 
 ---
 
-## 🔒 Local RAG Tool Implementation (`swarm/tools/local_pdf_parser.py`)
+## ⚙️ Architecture & Pipeline Overview
 
-This utility parses PDF agreements, splits them into semantic chunks, and builds a local FAISS index. It includes full error checking to avoid overwriting existing data room indices.
+The [LegalCompliance](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py#L466) agent implements a robust three-layer execution pipeline to audit target companies:
 
-```python
-"""
-swarm/tools/local_pdf_parser.py
-Extracts PDF text, performs chunking, generates embeddings using sentence-transformers,
-and executes local similarity searches via FAISS. Zero data leaks to external index systems.
-"""
-
-import os
-import pickle
-import logging
-from typing import List, Dict, Any
-import numpy as np
-from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
-import faiss
-
-# Configure logger
-logger = logging.getLogger("swarm.tools.local_pdf_parser")
-
-MODEL_NAME = 'all-MiniLM-L6-v2'
-INDEX_PATH = "data_room/vector_store/faiss_index.index"
-METADATA_PATH = "data_room/vector_store/metadata.pkl"
-
-def get_transformer_model() -> SentenceTransformer:
-    """Helper to initialize the SentenceTransformer model locally."""
-    return SentenceTransformer(MODEL_NAME)
-
-def chunk_document_text(text: str, chunk_size_words: int = 250, overlap_words: int = 30) -> List[str]:
-    """Helper function to split text into overlapping word chunks."""
-    words = text.split()
-    if len(words) <= chunk_size_words:
-        return [" ".join(words)]
-        
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk = " ".join(words[i:i + chunk_size_words])
-        chunks.append(chunk)
-        i += (chunk_size_words - overlap_words)
-    return chunks
-
-def index_document(pdf_path: str) -> bool:
-    """
-    Parses pages from the target PDF contract, chunks them, generates embeddings,
-    and appends them to a local FAISS vector index.
-    """
-    if not os.path.exists(pdf_path):
-        logger.error(f"Target PDF file does not exist: {pdf_path}")
-        return False
-
-    try:
-        reader = PdfReader(pdf_path)
-    except Exception as e:
-        logger.error(f"Failed to read PDF file: {str(e)}")
-        return False
-        
-    filename = os.path.basename(pdf_path)
-    logger.info(f"Extracting text from: {filename} ({len(reader.pages)} pages)")
-
-    chunks_extracted = []
-    metadata_list = []
-
-    for page_idx, page in enumerate(reader.pages):
-        text = page.extract_text()
-        if not text or not text.strip():
-            logger.warning(f"Empty text on page {page_idx + 1} of {filename}")
-            continue
-            
-        page_chunks = chunk_document_text(text)
-        for chunk in page_chunks:
-            chunks_extracted.append(chunk)
-            metadata_list.append({
-                "source": filename,
-                "page": page_idx + 1,
-                "text": chunk
-            })
-
-    if not chunks_extracted:
-        logger.warning(f"No text extracted from PDF document: {filename}")
-        return False
-
-    # Generate Embeddings
-    model = get_transformer_model()
-    embeddings = model.encode(chunks_extracted)
-    
-    # Store in FAISS
-    os.makedirs("data_room/vector_store", exist_ok=True)
-    dimension = embeddings.shape[1]
-    
-    if os.path.exists(INDEX_PATH) and os.path.exists(METADATA_PATH):
-        try:
-            index = faiss.read_index(INDEX_PATH)
-            with open(METADATA_PATH, 'rb') as f:
-                existing_metadata = pickle.load(f)
-        except Exception as e:
-            logger.error(f"Failed to read existing FAISS index. Initializing new database. Error: {str(e)}")
-            index = faiss.IndexFlatL2(dimension)
-            existing_metadata = []
-    else:
-        index = faiss.IndexFlatL2(dimension)
-        existing_metadata = []
-
-    # Add embeddings to the FLAT index
-    index.add(np.array(embeddings).astype('float32'))
-    existing_metadata.extend(metadata_list)
-
-    # Save to disk
-    try:
-        faiss.write_index(index, INDEX_PATH)
-        with open(METADATA_PATH, 'wb') as f:
-            pickle.dump(existing_metadata, f)
-        logger.info(f"Successfully indexed {len(chunks_extracted)} chunks from {filename}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write FAISS index files to disk: {str(e)}")
-        return False
-
-def query_local_vector_store(query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    """
-    Executes a vector search over the local database.
-    Returns matching document chunks with corresponding source metadata.
-    """
-    if not os.path.exists(INDEX_PATH) or not os.path.exists(METADATA_PATH):
-        logger.warning("Query execution failed: No local vector store index found.")
-        return []
-
-    try:
-        model = get_transformer_model()
-        query_emb = model.encode([query_text]).astype('float32')
-
-        index = faiss.read_index(INDEX_PATH)
-        with open(METADATA_PATH, 'rb') as f:
-            metadata = pickle.load(f)
-
-        distances, indices = index.search(query_emb, top_k)
-        
-        results = []
-        for rank, index_idx in enumerate(indices[0]):
-            if index_idx < len(metadata):
-                results.append({
-                    "rank": rank + 1,
-                    "score": float(distances[0][rank]),
-                    "page": metadata[index_idx]["page"],
-                    "source": metadata[index_idx]["source"],
-                    "text": metadata[index_idx]["text"]
-                })
-        return results
-    except Exception as e:
-        logger.error(f"Vector search failed: {str(e)}")
-        return []
+```mermaid
+graph TD
+    A[Start Legal Compliance Audit] --> B{Verify Local FAISS Vector Index}
+    B -- Index Missing --> C[Return skipped state, skip RAG checks]
+    B -- Index Present --> D[Layer 1: FAISS Semantic & Keyword Fallback Search]
+    D --> E{Gemini API Key Available?}
+    E -- Yes --> F[Layer 2: Gemini AI Deep Clause Auditing]
+    E -- No --> G[Skip Gemini, rely on FAISS findings]
+    F --> H[Merge & Deduplicate Findings]
+    G --> H
+    H --> I[Layer 3: External CourtListener & GovInfo Querying]
+    I --> J[Dynamic Severity Adjustment & HITL Check]
+    J --> K[Construct Red Flag Alerts & Markdown Report]
+    K --> L[Return Output to Swarm Orchestrator]
 ```
 
 ---
 
-## 🤖 Main Agent Code Skeleton (`swarm/agents/legal_compliance.py`)
+## 🔒 Local RAG Tool Implementation ([local_pdf_parser.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py))
 
-Integrates local vector store results and coordinates active litigation searches using the CourtListener MCP.
+Ensures zero-leakage parsing of sensitive PDF contracts. It utilizes `pypdf` for text parsing, `sentence-transformers` for embedding generation, and flat `faiss` for storage indexing.
 
-```python
-"""
-swarm/agents/legal_compliance.py
-Legal Compliance agent using ADK. Audits target contracts via local RAG.
-"""
-
-from swarm.orchestrator import register_agent
-from swarm.tools.local_pdf_parser import query_local_vector_store
-from swarm.tools.data_sanitizer import sanitize_search_query
-import os
-import json
-import logging
-from typing import Dict, Any
-
-logger = logging.getLogger("swarm.agents.legal_compliance")
-
-@register_agent("legal_compliance")
-class LegalCompliance:
-    def __init__(self, industry: str = "generic"):
-        self.industry = industry
-
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Runs RAG verification over ingested private documents.
-        Checks CourtListener for pending litigation.
-        """
-        target_company = context.get("target_company", "Target Company")
-        data_room_path = context.get("data_room_path", "data_room/uploads/legal")
-        
-        # Verify vector store files exist
-        vector_db_exists = os.path.exists("data_room/vector_store/faiss_index.index")
-        
-        if not vector_db_exists:
-            msg = "Local vector index database not initialized. No legal documents indexed."
-            logger.warning(msg)
-            return {
-                "findings": {"status": "skipped", "hitl_required": False},
-                "markdown": f"### Legal Diligence\n{msg}\n\n*Skipped RAG checks.*"
-            }
-
-        # 1. Query Local Vector Store for Change of Control/Poison Pills
-        liability_results = query_local_vector_store("change of control buyout penalty termination indemnity limit", top_k=3)
-        
-        # Analyze findings via LLM Prompt (simulated logic shown here)
-        flags = []
-        hitl_required = False
-        hitl_reason = None
-        
-        for res in liability_results:
-            text_lower = res["text"].lower()
-            if "penalty" in text_lower or "termination fee" in text_lower or "buyout" in text_lower:
-                flags.append({
-                    "severity": "CRITICAL",
-                    "metric": "Change of Control / Buyout Penalty",
-                    "document": res["source"],
-                    "page": res["page"],
-                    "quote": res["text"][:150] + "...",
-                    "description": "Found change-of-control buyout penalty clause in target contract agreements."
-                })
-                hitl_required = True
-                hitl_reason = f"Buyout penalty detected in document {res['source']} on page {res['page']}."
-                break
-
-        # 2. Query CourtListener MCP (Simulate or utilize workspace client connection)
-        # Sanitization rule: remove deal-specific metrics before dispatching public queries
-        clean_company_query = sanitize_search_query(target_company, ["merger", "buyout"])
-        courtlistener_findings = {
-            "search_query": clean_company_query,
-            "active_lawsuits_found": 0,
-            "dockets": []
-        }
-
-        # Compile report markdown
-        markdown_report = f"""### Legal & Compliance Diligence: {target_company}
-- **RAG Status:** Active (Index flats searched)
-- **Active Undisclosed Litigation Search:** Clean (Searched CourtListener for '{clean_company_query}')
-
-#### Risk Analysis & Flagged Findings
-"""
-        if not flags:
-            markdown_report += "*No critical legal compliance flags raised.*"
-        else:
-            for flag in flags:
-                markdown_report += f"- **[{flag['severity']}]** {flag['metric']} in `{flag['document']}` (Page {flag['page']}):\n"
-                markdown_report += f"  > *\"{flag['quote']}\"*\n"
-                markdown_report += f"  *Description:* {flag['description']}\n"
-                
-        return {
-            "findings": {
-                "status": "success",
-                "flags": flags,
-                "courtlistener_audit": courtlistener_findings,
-                "hitl_required": hitl_required,
-                "hitl_reason": hitl_reason
-            },
-            "markdown": markdown_report
-        }
-```
+### Core Functions:
+1. **[get_transformer_model](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L23):** Loads `all-MiniLM-L6-v2` locally.
+2. **[chunk_document_text](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L27) (or [chunk_text](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L42)):** Splits text into overlapping word blocks (250-word size, 30-word overlap) to preserve semantic boundaries.
+3. **[index_document](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L44):** Reads a target PDF, generates overlapping chunks, encodes them, and registers them into the flat FAISS index. Existing database states are loaded, updated, and saved to `data_room/vector_store/faiss_index.index` and `metadata.pkl`.
+4. **[query_local_vector_store](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L120):** Converts user queries into embeddings and queries the flat L2 FAISS index, matching page and source metadata.
 
 ---
 
-## 🤖 System Prompt Specification (`swarm/prompt_templates/legal_system.txt`)
+## 🤖 Main Agent Core & Queries ([legal_compliance.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py))
 
-Paste this exact system instruction into your prompt configuration:
+Audits the target company against **10 predefined legal queries (LQ-01 to LQ-10)** to look for standard risk profiles.
 
-```text
-You are the lead M&A Corporate Counsel Agent.
-Your core task is to audit target contracts (NDAs, IP, Exclusivity, buyouts) for hidden compliance risks.
+### 📋 The 10 Legal Queries (LQ) Matrix
+| Query ID | Category Name | Default Severity | HITL Trigger | Query Target Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **LQ-01** | Poison Pill / Deal Blocker | 🔴 1 - Critical | Yes | Change of control, anti-assignment, successor consent rules. |
+| **LQ-02** | Active Litigation | 🔴 1 - Critical | Yes | Pending lawsuits, arbitrations, patent disputes, cease & desist orders. |
+| **LQ-03** | IP Risk | 🔴 1 - Critical | Yes | IP ownership disputes, contested patents, GPL/AGPL copyleft issues. |
+| **LQ-04** | Indemnification / Financial Exposure | 🟠 2 - High | No | Liability limits, uncapped indemnities, hold harmless obligations. |
+| **LQ-05** | HR Liability / Golden Parachute | 🔴 1 - Critical | Yes | Golden parachutes, severance bonuses, unvested options acceleration. |
+| **LQ-06** | Operational Lock-in / Non-compete | 🟠 2 - High | No | Non-competes, exclusivity, rights of first refusal, MFN supplier terms. |
+| **LQ-07** | Regulatory Risk / Data Privacy | 🟠 2 - High | No | GDPR, CCPA, HIPAA breaches, regulatory warnings, DPA obligations. |
+| **LQ-08** | Financial Exposure / Revenue Guarantees | 🟠 2 - High | No | Earn-outs, take-or-pay minimum purchase commitments, price protection. |
+| **LQ-09** | Deal Blocker / Third-Party Consent | 🔴 1 - Critical | Yes | Prior written approvals, board/lender consent, antitrust reviews. |
+| **LQ-10** | Operational Lock-in / Auto-renewal | 🟠 2 - High | No | Evergreen clauses, perpetual terms, early termination penalty fees. |
 
-CRITICAL RULES:
-1. You must query the local vector store database for contract terms.
-2. If you find references to termination buyout penalties or change-of-control fees, you MUST raise a CRITICAL severity flag.
-3. Every flag you raise MUST include a verbatim quote from the document text, specifying page number and source name.
-4. Output your analysis in a structured JSON payload conforming to the orchestrator specification.
-```
+### ⚖️ Risk Classification & Escalation Rules
+- **[Severity Classification Rules](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py#L154):** The default query severity is refined based on monetary indicators detected inside the text.
+  - If a clause mentions liability/exposure $\ge \$1,000,000$, it is automatically upgraded to **1 (🔴 CRITICAL)**.
+  - If the exposure is $<\$100,000$, it is capped at a maximum of **3 (🟡 MEDIUM)**.
+- **[Recommended Actions](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py#L177):**
+  - **Severity 1 (Critical):** Immediate legal counsel intervention. Adjust valuation or add deal contingencies.
+  - **Severity 2 (High):** Flag for renegotiation and register in deal risks.
+  - **Severity 3 (Medium):** Attorney note for post-closing verification.
+  - **Severity 4 (Low):** Standard log.
+- **Human-in-the-Loop (HITL) Triggers:** Any Severity 1 finding matching a critical category (LQ-01, LQ-02, LQ-03, LQ-05, LQ-09) sets `hitl_required` to `True`, Halting the automated pipeline run and requiring Investment Partner review.
+- **Red Flag Alerts:** Spawns structured option selectors in the final report to instruct investment teams on options (Halt, Adjust Valuation, Seek Counsel, Override).
 
 ---
 
-## 🧪 Verification & Testing
-Create `tests/test_legal.py` to assert correct chunking and indexing:
+## 🛡️ Outbound Query Sanitizer ([data_sanitizer.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/data_sanitizer.py))
 
-```python
-# tests/test_legal.py
-import pytest
-from swarm.tools.local_pdf_parser import chunk_document_text, chunk_text
+Outbound queries to external litigation indexes present a significant leakage hazard.
+The **[sanitize_search_query](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/data_sanitizer.py#L13)** function scrubs sensitive transaction intents before forwarding queries:
+1. Replaced user-defined transaction variables or bidder/acquirer names with generic markers.
+2. Replaced common M&A terms (e.g., `merger`, `acquisition`, `buyout`, `takeover`, `valuation`) with empty space.
+3. Cleaned spaces and stripped special symbols.
+   - *Example:* `"Acme Corp Buyout"` $\rightarrow$ `"Acme Corp"`
 
-def test_document_chunk_boundaries():
-    text = "one two three four five six"
-    # Chunk size: 3 words, overlap: 1 word
-    chunks = chunk_document_text(text, chunk_size_words=3, overlap_words=1)
-    
-    assert len(chunks) == 3
-    assert chunks[0] == "one two three"
-    assert chunks[1] == "three four five"
-    assert chunks[2] == "five six"
-```
+---
+
+## 🏛️ External Litigation & Regulatory Integrations ([legal_api_clients.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py))
+
+Active lawsuits and compliance warnings are queried through official government indices:
+1. **[query_courtlistener](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py#L14):** Connects to the CourtListener Docket Search API. It extracts case name, filing court, docket status (active/archived), and direct URLs.
+2. **[query_govinfo](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py#L59):** Performs POST requests to `api.govinfo.gov` searching regulatory warnings and Federal Register citations.
+3. **Simulation Fallbacks:** In the absence of API keys/tokens, the clients automatically fallback to generating realistic mock cases (e.g., patent disputes, EPA violations) when the sanitized company query matches testing keys (e.g., `Acme`, `Cyberdyne`, `Enron`).
+
+---
+
+## 🧠 Deep AI Clause Analysis ([gemini_clause_analyzer.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/gemini_clause_analyzer.py))
+
+If a `gemini_api_key` is available, FAISS-retrieved text blocks are pushed to **[analyze_clauses_with_gemini](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/gemini_clause_analyzer.py#L15)** for structured AI auditing.
+
+- **Model:** `gemini-2.5-flash`
+- **Configuration:** Structured JSON mode (`response_mime_type="application/json"`).
+- **Core Directives:** Extract risk metrics corresponding to LQ-01 to LQ-10. Output verbatim quotes, severity labels, risk descriptions, estimated liability amounts, and clear recommendations.
+- **Deduplication:** [_merge_gemini_findings](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/agents/legal_compliance.py#L280) merges AI assessments with local keyword matches, upgrading findings with Gemini's detailed analysis.
+
+---
+
+## 🌐 FastAPI Endpoint ([ingest.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/backend/app/routers/ingest.py))
+
+The endpoint allows programmatic uploading and ingestion:
+- **Route:** `POST /api/ingest/legal`
+- **Content-Type:** `multipart/form-data`
+- **Actions:**
+  1. Validates the extension is `.pdf`.
+  2. Saves the file under `data_room/uploads/legal/`.
+  3. Executes [index_document](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/local_pdf_parser.py#L44) to update vector databases.
+  4. Returns ingestion statuses.
+
+---
+
+## 🎨 Frontend Audit Panel ([LegalViewer.jsx](file:///C:/Users/abdul/VYC-Vibes-Your-Code/frontend/src/components/LegalViewer.jsx))
+
+The React UI provides an elegant dashboard for managing private document ingestion:
+
+1. **Drag-and-Drop Area:** Validates and queues PDF files, with visual alerts for unsupported file formats.
+2. **Uploading Status Indicators:** Communicates backend processing and indexing states.
+3. **Offline Demo Simulation:** Automatically intercepts server network failures to trigger rich mockup outputs, facilitating seamless evaluation.
+4. **Audit Metrics Panel:** Features summary blocks tracking active vector databases, flag counts, and litigation warnings.
+5. **Detailed Finding Cards:** Flags critical contract liabilities highlighting page numbers, verbatim quotes, severity, and descriptions.
+6. **Regulatory & Litigation Listings:** Renders docket tables populated from CourtListener and GovInfo.
+7. **Human-in-the-Loop Banner:** Warns deal leads of pending critical escalations.
+
+---
+
+## 🧪 Verification & Testing ([test_legal.py](file:///C:/Users/abdul/VYC-Vibes-Your-Code/tests/test_legal.py))
+
+Includes exhaustive unit and patch tests:
+1. **[test_document_chunk_boundaries](file:///C:/Users/abdul/VYC-Vibes-Your-Code/tests/test_legal.py#L10):** Asserts word-based chunk splitting boundaries and overlaps.
+2. **[test_legal_agent_compliance_audit](file:///C:/Users/abdul/VYC-Vibes-Your-Code/tests/test_legal.py#L35):** Patches filesystem checks and FAISS outputs to verify:
+   - Verification of Poison Pill (LQ-01) and Golden Parachute (LQ-05) escalation pathways.
+   - Successful query sanitization (e.g., removing transaction descriptors like `"Buyout"`).
+   - Triggering of Human-in-the-Loop conditions.
+3. **API Client Unit Tests:** Verifies [query_courtlistener](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py#L14) and [query_govinfo](file:///C:/Users/abdul/VYC-Vibes-Your-Code/swarm/tools/legal_api_clients.py#L59) simulator responses.
+4. **Gemini Clause Analyzer Tests:** Verifies JSON schema compliance.
