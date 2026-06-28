@@ -8,6 +8,8 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    courtlistener_api_token: str = Field(default="", validation_alias="COURTLISTENER_API_TOKEN")
+    govinfo_api_key: str = Field(default="", validation_alias="GOVINFO_API_KEY")
     host: str = Field(default="0.0.0.0", validation_alias="HOST")
     port: int = Field(default=8000, validation_alias="PORT")
     environment: str = Field(default="development", validation_alias="ENVIRONMENT")
