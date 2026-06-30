@@ -77,7 +77,33 @@ def load_system_prompt() -> str:
 
 # Session persistence helpers
 def save_session(state: 'SessionState') -> None:
-    """Serializes and saves the SessionState Pydantic model to a local JSON file."""
+    """Serializes and saves the SessionState Pydantic model to SQLite DB and local JSON file."""
+    # 1. Save to SQLite Database
+    try:
+        from backend.app.database.models import AuditSession
+        from backend.app.database.connection import db
+        import json
+        
+        # Serialize history and agent_reports
+        history_data = [m.model_dump() for m in state.history]
+        reports_data = {k: v.model_dump() for k, v in state.agent_reports.items()}
+        
+        db.connect(reuse_if_open=True)
+        AuditSession.insert(
+            session_id=state.session_id,
+            target_company=state.target_company,
+            industry_sector=state.industry_sector,
+            hitl_status=state.hitl_status,
+            pending_hitl_question=state.pending_hitl_question,
+            accumulated_red_flags=json.dumps(state.accumulated_red_flags),
+            history=json.dumps(history_data),
+            agent_reports=json.dumps(reports_data)
+        ).on_conflict_replace().execute()
+        logger.info(f"Successfully saved session state to database for: {state.session_id}")
+    except Exception as e:
+        logger.error(f"Failed to save session state to database for {state.session_id}: {e}", exc_info=True)
+
+    # 2. Save to local JSON file for compatibility/fallback
     try:
         sessions_dir = os.path.join(settings.data_room_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
@@ -86,10 +112,36 @@ def save_session(state: 'SessionState') -> None:
             f.write(state.model_dump_json(indent=2))
         logger.info(f"Successfully saved session state to disk at: {file_path}")
     except Exception as e:
-        logger.error(f"Failed to save session state for {state.session_id}: {e}", exc_info=True)
+        logger.error(f"Failed to save session state to disk for {state.session_id}: {e}", exc_info=True)
 
 def load_session(session_id: str) -> Optional['SessionState']:
-    """Loads and deserializes the SessionState from a local JSON file."""
+    """Loads and deserializes the SessionState from SQLite DB first, falling back to local JSON."""
+    # 1. Try loading from SQLite Database
+    try:
+        from backend.app.database.models import AuditSession
+        from backend.app.database.connection import db
+        import json
+        
+        db.connect(reuse_if_open=True)
+        record = AuditSession.get_or_none(AuditSession.session_id == session_id)
+        if record:
+            data = {
+                "session_id": record.session_id,
+                "target_company": record.target_company,
+                "industry_sector": record.industry_sector,
+                "hitl_status": record.hitl_status,
+                "pending_hitl_question": record.pending_hitl_question,
+                "accumulated_red_flags": json.loads(record.accumulated_red_flags),
+                "history": json.loads(record.history),
+                "agent_reports": json.loads(record.agent_reports)
+            }
+            state = SessionState(**data)
+            logger.info(f"Successfully loaded session state from database for: {session_id}")
+            return state
+    except Exception as e:
+        logger.error(f"Failed to load session state from database for {session_id}: {e}", exc_info=True)
+
+    # 2. Fallback to local JSON file
     try:
         file_path = os.path.join(settings.data_room_dir, "sessions", f"{session_id}.json")
         if os.path.exists(file_path):
@@ -99,7 +151,7 @@ def load_session(session_id: str) -> Optional['SessionState']:
             logger.info(f"Successfully loaded session state from disk at: {file_path}")
             return state
     except Exception as e:
-        logger.error(f"Failed to load session state for {session_id}: {e}", exc_info=True)
+        logger.error(f"Failed to load session state from disk for {session_id}: {e}", exc_info=True)
     return None
 
 # Explicit mapping of sub-agents to upload subdirectories

@@ -4,6 +4,7 @@ import {
   AlertCircle, FileText, RefreshCw, TrendingUp, Download, Check
 } from 'lucide-react';
 import DocumentUploader from './components/DocumentUploader';
+import OpsDashboard from './components/OpsDashboard';
 
 function App() {
   const [sessionId, setSessionId] = useState('session-' + Math.floor(Math.random() * 9000 + 1000));
@@ -12,6 +13,8 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [statusLogs, setStatusLogs] = useState([]);
   const [uploadedFileName, setUploadedFileName] = useState('');
+  const [agentReports, setAgentReports] = useState({});
+  const [uploadedOpsLogName, setUploadedOpsLogName] = useState('');
   
   // Track agent states: 'idle', 'running', 'success', 'error'
   const [agentStatus, setAgentStatus] = useState({
@@ -49,6 +52,8 @@ function App() {
     setFinalMemo('');
     setHitlState(null);
     setAccumulatedFlags([]);
+    setAgentReports({});
+    setUploadedOpsLogName('');
     setStatusLogs([]);
     setAgentStatus({
       financial_auditor: 'idle',
@@ -166,6 +171,7 @@ function App() {
       if (res.ok) {
         const data = await res.json();
         setAccumulatedFlags(data.accumulated_red_flags || []);
+        setAgentReports(data.agent_reports || {});
       }
     } catch (e) {
       console.error("Failed to fetch memo details:", e);
@@ -363,6 +369,20 @@ function App() {
             />
           </div>
 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+            <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500, marginBottom: '4px' }}>Operations Data Room (CSV Reviews)</label>
+            <OpsDashboard 
+              industry={industrySector}
+              sessionId={sessionId}
+              agentReport={{ status: 'idle' }}
+              isSwarmRunning={isRunning}
+              onUploadSuccess={(name) => {
+                setUploadedOpsLogName(name);
+                setStatusLogs(prev => [...prev, `[INFO] Ingested and verified operations log: ${name}`]);
+              }}
+            />
+          </div>
+
           <button 
             onClick={startAudit}
             disabled={isRunning || hitlState}
@@ -550,6 +570,22 @@ function App() {
                   Resume Swarm Audit
                 </button>
               </div>
+            </section>
+          )}
+
+          {/* Operations Agent Dashboard */}
+          {agentStatus.ops_evaluator !== 'idle' && (
+            <section className="glass animate-fade-in-up" style={{ padding: '24px' }}>
+              <OpsDashboard 
+                industry={industrySector}
+                sessionId={sessionId}
+                agentReport={
+                  agentStatus.ops_evaluator === 'success' 
+                    ? agentReports.ops_evaluator 
+                    : { status: agentStatus.ops_evaluator }
+                }
+                isSwarmRunning={isRunning}
+              />
             </section>
           )}
 

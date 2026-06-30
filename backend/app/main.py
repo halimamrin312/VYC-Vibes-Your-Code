@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from backend.app.routers import chat, hitl, memo, auth, ingest
+from backend.app.database.models import init_db
+
+# Initialize database
+init_db()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

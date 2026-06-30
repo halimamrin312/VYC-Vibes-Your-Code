@@ -42,5 +42,6 @@ def get_investment_memo(session_id: str):
         "target_company": orch.state.target_company,
         "industry_sector": orch.state.industry_sector,
         "memo_markdown": memo_content,
-        "accumulated_red_flags": orch.state.accumulated_red_flags
+        "accumulated_red_flags": orch.state.accumulated_red_flags,
+        "agent_reports": {k: v.model_dump() for k, v in orch.state.agent_reports.items()}
     }
