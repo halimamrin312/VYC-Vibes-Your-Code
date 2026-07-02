@@ -1,0 +1,295 @@
+/* CSS Design System: Sleek Dark Slate Tech Theme */
+
+:root {
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Harmonious Dark Palette */
+  --bg-base: #0a0f1d;
+  --bg-surface: rgba(18, 25, 47, 0.7);
+  --bg-surface-elevated: rgba(26, 36, 68, 0.9);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(99, 102, 241, 0.5);
+
+  /* Brand Accents (HSL-curated) */
+  --accent-primary: #6366f1; /* Indigo */
+  --accent-primary-glow: rgba(99, 102, 241, 0.15);
+  --accent-secondary: #06b6d4; /* Cyan */
+  --accent-success: #10b981; /* Emerald */
+  --accent-warning: #f59e0b; /* Amber */
+  --accent-danger: #ef4444; /* Rose */
+
+  /* Text Colors */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Pulsing micro-animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(99, 102, 241, 0.6);
+  }
+}
+
+@keyframes pulse-glow-cyan {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(6, 182, 212, 0.6);
+  }
+}
+
+@keyframes pulse-glow-amber {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(245, 158, 11, 0.6);
+  }
+}
+
+.glow-active {
+  animation: pulse-glow 2s infinite;
+}
+
+.glow-active-cyan {
+  animation: pulse-glow-cyan 2s infinite;
+}
+
+.glow-active-amber {
+  animation: pulse-glow-amber 2s infinite;
+}
+
+/* Input Fields */
+input, select, textarea {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 10px 14px;
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  transition: var(--transition-smooth);
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary-glow);
+}
+
+/* Premium Buttons */
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #4f46e5 100%);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--text-secondary);
+}
+
+/* Layout Classes */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  padding: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  min-height: calc(100vh - 80px);
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Code Markdown styling */
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.markdown-body h1 { border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+.markdown-body p { margin-bottom: 16px; color: var(--text-secondary); line-height: 1.6; }
+.markdown-body ul { margin-bottom: 16px; padding-left: 20px; color: var(--text-secondary); }
+.markdown-body li { margin-bottom: 6px; }
+
+/* Motion Design Upgrades */
+
+/* Micro-interaction: Button Press Feedback */
+.btn-primary:active, .btn-secondary:active {
+  transform: scale(0.97);
+  transition: transform 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Card Entrances: Premium Staggered Fade & Slide Up */
+@keyframes slide-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: slide-fade-up 400ms cubic-bezier(0.2, 0, 0.2, 1) both;
+}
+
+.stagger-1 { animation-delay: 0ms; }
+.stagger-2 { animation-delay: 60ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 180ms; }
+
+/* Log Stream Entry: Snap Slide from Left */
+@keyframes slide-in-left {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.log-item-fade {
+  animation: slide-in-left 250ms cubic-bezier(0.2, 0, 0.2, 1) both;
+}
+
+/* HITL Box Entrance: Physical Bounce Settle */
+@keyframes hitl-entrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-hitl-box {
+  animation: hitl-entrance 350ms cubic-bezier(0.175, 0.885, 0.32, 1.1) both;
+}
+
+/* Ambient Breathing Background pulse for running state */
+@keyframes pulse-glow-cyan-ambient {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.25);
+    background-color: rgba(18, 25, 47, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(6, 182, 212, 0.45);
+    background-color: rgba(6, 182, 212, 0.05);
+  }
+}
+
+.glow-active-cyan {
+  animation: pulse-glow-cyan-ambient 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Ambient breathing warning pulse */
+@keyframes pulse-glow-amber-ambient {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.25);
+    background-color: rgba(18, 25, 47, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(245, 158, 11, 0.45);
+    background-color: rgba(245, 158, 11, 0.05);
+  }
+}
+
+.glow-active-amber {
+  animation: pulse-glow-amber-ambient 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
