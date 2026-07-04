@@ -32,7 +32,11 @@ export const getApiBaseUrl = () => {
     return railwayBackendUrl;
   }
 
-  return import.meta.env.PROD ? DEFAULT_PROD_API_BASE_URL : '/api';
+  if (import.meta.env.DEV) {
+    return '/api';
+  }
+
+  return DEFAULT_PROD_API_BASE_URL;
 };
 
 export const apiFetch = (path, options = {}) => {
