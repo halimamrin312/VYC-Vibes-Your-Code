@@ -60,7 +60,10 @@ class ToolPolicyEngine:
         normalized_path = str(Path(target_path).resolve())
         # Enforce file-tree directory allowlist
         for allowed_dir in self.rules["directory_allowlist"]:
-            allowed_dir_norm = str(Path(allowed_dir).resolve())
+            allowed_dir_path = Path(allowed_dir)
+            if not allowed_dir_path.is_absolute():
+                allowed_dir_path = Path(os.getcwd()) / allowed_dir_path
+            allowed_dir_norm = str(allowed_dir_path.resolve())
             if normalized_path.startswith(allowed_dir_norm):
                 return True
         raise PermissionError(f"Security Policy Block: Unauthorized path write: {target_path}")

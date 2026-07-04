@@ -44,7 +44,10 @@ def test_pandas_analyst_missing_columns(tmp_path):
     assert "error" in results
     assert "Missing required columns" in results["error"]
 
-def test_company_classification():
+def test_company_classification(monkeypatch):
+    # Mock call_llm to force heuristics fallback consistently during unit tests
+    monkeypatch.setattr("swarm.agents.financial_auditor.call_llm", lambda *args, **kwargs: None)
+
     # Heuristics & LLM classifications
     res_us = classify_company("AAPL", "software")
     assert res_us["type"] == "public"
@@ -59,6 +62,7 @@ def test_company_classification():
     res_uk_private = classify_company("Barclays Holdings Ltd", "retail")
     assert res_uk_private["type"] == "private"
     assert res_uk_private["jurisdiction"] == "UK"
+
 
 def test_yfinance_normalization():
     res = normalize_yfinance_data("RELIANCE.NS")

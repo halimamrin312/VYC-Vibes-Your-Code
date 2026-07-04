@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     model_provider: str = Field(default="gemini", validation_alias="MODEL_PROVIDER")
     model_name: str = Field(default="gemini-2.5-flash", validation_alias="MODEL_NAME")
+    courtlistener_api_token: str = Field(default="", validation_alias="COURTLISTENER_API_TOKEN")
+    govinfo_api_key: str = Field(default="", validation_alias="GOVINFO_API_KEY")
     
     host: str = Field(default="0.0.0.0", validation_alias="HOST")
     port: int = Field(default=8000, validation_alias="PORT")

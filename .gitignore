@@ -7,6 +7,10 @@ __pycache__/
 venv/
 ENV/
 env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
 
 # Node
 node_modules/
@@ -15,12 +19,24 @@ yarn-debug.log*
 yarn-error.log*
 .eslintcache
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 # Local/Data files
 data_room/
 *.log
+
+# Build outputs
+frontend/dist/
+frontend/build/
 
 # IDEs/OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Gemini / AI tools
+.gemini/
