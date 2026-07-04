@@ -1,11 +1,38 @@
+const DEFAULT_PROD_API_BASE_URL = 'https://swarm-ai-backend-production.up.railway.app';
+
 const normalizeBaseUrl = (value) => {
   if (!value) return '';
   return value.replace(/\/+$/, '');
 };
 
+const getRailwayBackendUrl = () => {
+  const publicDomain = import.meta.env.RAILWAY_PUBLIC_DOMAIN;
+  const serviceName = import.meta.env.RAILWAY_SERVICE_NAME;
+
+  if (publicDomain && serviceName && serviceName.includes('backend')) {
+    return `https://${publicDomain}`;
+  }
+
+  if (publicDomain && publicDomain.includes('backend')) {
+    return `https://${publicDomain}`;
+  }
+
+  return '';
+};
+
 export const getApiBaseUrl = () => {
   const configuredBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
-  return configuredBaseUrl || '/api';
+
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  const railwayBackendUrl = getRailwayBackendUrl();
+  if (railwayBackendUrl) {
+    return railwayBackendUrl;
+  }
+
+  return import.meta.env.PROD ? DEFAULT_PROD_API_BASE_URL : '/api';
 };
 
 export const apiFetch = (path, options = {}) => {
