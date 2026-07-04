@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './LegalViewer.css';
+import { apiFetch } from '../services/api';
 
 export default function LegalViewer() {
     const [file, setFile] = useState(null);
@@ -60,7 +61,7 @@ export default function LegalViewer() {
         formData.append('file', file);
 
         try {
-            const response = await fetch('/api/ingest/legal', {
+            const response = await apiFetch('/api/ingest/legal', {
                 method: 'POST',
                 body: formData,
             });

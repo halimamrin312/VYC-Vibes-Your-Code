@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { apiFetch } from '../services/api';
 
 function DocumentUploader({ sessionId, onUploadSuccess }) {
   const [file, setFile] = useState(null);
@@ -57,7 +58,7 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
     formData.append('session_id', sessionId);
 
     try {
-      const response = await fetch('/api/ingest/financial', {
+      const response = await apiFetch('/api/ingest/financial', {
         method: 'POST',
         body: formData
       });
