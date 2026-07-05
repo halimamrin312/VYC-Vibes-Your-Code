@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import DocumentUploader from './components/DocumentUploader';
 import OpsDashboard from './components/OpsDashboard';
+import { apiFetch } from './services/api';
 
 function App() {
   const [sessionId, setSessionId] = useState('session-' + Math.floor(Math.random() * 9000 + 1000));
@@ -63,7 +64,7 @@ function App() {
     });
 
     try {
-      const response = await fetch('/api/chat/stream', {
+      const response = await apiFetch('/api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -167,7 +168,7 @@ function App() {
 
   const fetchMemoDetails = async () => {
     try {
-      const res = await fetch(`/api/memo/${sessionId}`);
+      const res = await apiFetch(`/api/memo/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
         setAccumulatedFlags(data.accumulated_red_flags || []);
@@ -186,7 +187,7 @@ function App() {
 
     setIsHitlSubmitting(true);
     try {
-      const response = await fetch('/api/hitl/respond', {
+      const response = await apiFetch('/api/hitl/respond', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -221,7 +222,7 @@ function App() {
       // Resume execution loop by sending the user message again
       setIsRunning(true);
       
-      const streamResponse = await fetch('/api/chat/stream', {
+      const streamResponse = await apiFetch('/api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
