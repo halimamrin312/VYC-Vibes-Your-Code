@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 
 const apiTarget = process.env.VITE_API_BASE_URL || (process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-  : 'https://swarm-ai-backend-production.up.railway.app')
+  : (process.env.NODE_ENV === 'production'
+    ? 'https://swarm-ai-backend-production.up.railway.app'
+    : 'http://127.0.0.1:8000'))
 const allowedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '.up.railway.app']
 
 // https://vitejs.dev/config/

@@ -33,7 +33,7 @@ export const getApiBaseUrl = () => {
   }
 
   if (import.meta.env.DEV) {
-    return '/api';
+    return '';
   }
 
   return DEFAULT_PROD_API_BASE_URL;
@@ -41,6 +41,7 @@ export const getApiBaseUrl = () => {
 
 export const apiFetch = (path, options = {}) => {
   const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const url = `${baseUrl}${normalizedPath}`;
   return fetch(url, options);
 };
