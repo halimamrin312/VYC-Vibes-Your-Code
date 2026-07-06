@@ -1,3 +1,4 @@
+
 """
 swarm/orchestrator.py
 Central Orchestrator loop and agent registry for the M&A Due Diligence Swarm.
@@ -329,7 +330,10 @@ class Orchestrator:
                     "target_company": self.state.target_company,
                     "session_id": self.state.session_id,
                     "data_room_path": AGENT_DATA_PATHS.get(agent_name, f"data_room/uploads/{agent_name.split('_')[0]}"),
-                    "sensitive_terms": [self.state.target_company, "merger", "buyout", "acquisition"]
+                    "sensitive_terms": [self.state.target_company, "merger", "buyout", "acquisition"],
+                    "gemini_api_key": settings.gemini_api_key,
+                    "courtlistener_api_token": settings.courtlistener_api_token,
+                    "govinfo_api_key": settings.govinfo_api_key
                 }
                 
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -447,7 +451,10 @@ class Orchestrator:
                     "session_id": self.state.session_id,
                     "data_room_path": AGENT_DATA_PATHS.get(agent_name, f"data_room/uploads/{agent_name.split('_')[0]}"),
                     "sensitive_terms": [self.state.target_company, "merger", "buyout", "acquisition"],
-                    "wave_1_context": wave_1_context
+                    "wave_1_context": wave_1_context,
+                    "gemini_api_key": settings.gemini_api_key,
+                    "courtlistener_api_token": settings.courtlistener_api_token,
+                    "govinfo_api_key": settings.govinfo_api_key
                 }
                 
             from concurrent.futures import ThreadPoolExecutor, as_completed

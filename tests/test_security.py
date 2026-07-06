@@ -102,16 +102,15 @@ gating_rules:
     with pytest.raises(PermissionError, match="Unauthorized path write"):
         engine.validate_file_path(str(disallowed_file))
 
-def test_ephemeral_sandbox_execution(tmp_path):
+def test_ephemeral_sandbox_execution(tmp_path, monkeypatch):
     allowed_dir = tmp_path / "scratch"
     allowed_dir.mkdir()
     
-    # We must mock or create scratch workspace at the expected path
-    # EphemeralSandbox writes temporary scripts to "d:/kaggle capstone project/scratch/"
-    # Let's ensure the path exists
-    os.makedirs("d:/kaggle capstone project/scratch/", exist_ok=True)
-
+    # Configure sandbox directory dynamically using environment variable
     allowed_dir_str = str(allowed_dir).replace('\\', '/')
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("SANDBOX_SCRATCH_DIR", allowed_dir_str)
+    
     config_yaml = tmp_path / "security_config.yaml"
     config_yaml.write_text(f"""
 gating_rules:
@@ -122,7 +121,6 @@ gating_rules:
     - os.system
   directory_allowlist:
     - "{allowed_dir_str}"
-    - "d:/kaggle capstone project/scratch/"
 """)
     engine = ToolPolicyEngine(str(config_yaml))
     sandbox = EphemeralSandbox(engine)

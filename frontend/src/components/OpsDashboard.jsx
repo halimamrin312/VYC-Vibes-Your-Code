@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiFetch } from '../services/api';
 import { 
   Upload, Cpu, Users, MessageSquare, AlertTriangle, 
   CheckCircle2, ShieldAlert, Loader2, FileText, RefreshCw, Star, HeartHandshake 
@@ -67,7 +68,7 @@ function OpsDashboard({ industry, sessionId, agentReport, isSwarmRunning, onUplo
     formData.append('industry', industry);
 
     try {
-      const response = await fetch('/api/ingest/logs', {
+      const response = await apiFetch('/api/ingest/logs', {
         method: 'POST',
         body: formData
       });

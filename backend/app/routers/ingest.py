@@ -10,6 +10,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 import logging
 from backend.app.utils.sanitizer import sanitize_filename
 from backend.app.utils.file_processor import process_csv
+from swarm.tools.local_pdf_parser import index_document
 
 logger = logging.getLogger("backend.app.routers.ingest")
 

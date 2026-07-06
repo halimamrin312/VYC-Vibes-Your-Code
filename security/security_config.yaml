@@ -18,6 +18,8 @@ gating_rules:
     - subprocess.Popen
     - shutil.rmtree
   directory_allowlist:
+    - "./scratch/"
+    - "./raw/"
     - "d:/kaggle capstone project/scratch/"
     - "d:/kaggle capstone project/raw/"
 
