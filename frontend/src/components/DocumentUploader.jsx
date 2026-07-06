@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { apiFetch } from '../services/api';
 
-function DocumentUploader({ sessionId, onUploadSuccess }) {
+function DocumentUploader({ 
+  sessionId, 
+  onUploadSuccess, 
+  uploadType = 'financial',
+  accept = '.csv',
+  label = 'Drag & Drop CSV Financials',
+  subLabel = 'or click to browse local files',
+  endpoint = '/api/ingest/financial',
+  showSessionId = true
+}) {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState('idle'); // 'idle' | 'uploading' | 'success' | 'error'
   const [message, setMessage] = useState('');
@@ -24,11 +34,12 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.name.endsWith('.csv')) {
+      const hasAllowedExtension = accept.split(',').some(ext => droppedFile.name.toLowerCase().endsWith(ext.trim().toLowerCase()));
+      if (hasAllowedExtension) {
         handleFileSelect(droppedFile);
       } else {
         setStatus('error');
-        setMessage('Only CSV file formats are supported.');
+        setMessage(`Only ${accept} file formats are supported.`);
       }
     }
   };
@@ -50,14 +61,16 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
     if (!file) return;
 
     setStatus('uploading');
-    setMessage('Uploading and performing structural checks...');
+    setMessage(uploadType === 'legal' ? 'Uploading and indexing legal agreement...' : 'Uploading and performing structural checks...');
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('session_id', sessionId);
+    if (showSessionId) {
+      formData.append('session_id', sessionId);
+    }
 
     try {
-      const response = await fetch('/api/ingest/financial', {
+      const response = await apiFetch(endpoint, {
         method: 'POST',
         body: formData
       });
@@ -69,7 +82,11 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
       }
 
       setStatus('success');
-      setMessage(`Successfully validated! Loaded ${data.record_count} financial periods.`);
+      if (uploadType === 'legal') {
+        setMessage(`Successfully ingested and indexed: ${file.name}`);
+      } else {
+        setMessage(`Successfully validated! Loaded ${data.record_count} financial periods.`);
+      }
       if (onUploadSuccess) {
         onUploadSuccess(file.name);
       }
@@ -104,8 +121,8 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
       >
         <input 
           type="file" 
-          id="file-upload" 
-          accept=".csv" 
+          id={`file-upload-${uploadType}`} 
+          accept={accept} 
           onChange={handleChange}
           style={{
             position: 'absolute',
@@ -125,10 +142,10 @@ function DocumentUploader({ sessionId, onUploadSuccess }) {
         )}
         
         <p style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-          {file ? 'File Selected' : 'Drag & Drop CSV Financials'}
+          {file ? 'File Selected' : label}
         </p>
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          {file ? 'Click upload button below to ingest' : 'or click to browse local files'}
+          {file ? 'Click upload button below to ingest' : subLabel}
         </p>
       </div>
 
