@@ -15,6 +15,27 @@ An automated, multi-agent due diligence platform for Mergers & Acquisitions (M&A
 
 ---
 
+## 🧠 Core Concepts Covered
+
+The platform is designed around five main concepts, and each one is implemented in a concrete way inside the repository.
+
+### 1. Agent / Multi-Agent System (ADK)
+The orchestration layer is implemented in [swarm/orchestrator.py](swarm/orchestrator.py). It uses a central orchestrator, a dynamic agent registry, and automatic discovery of agent modules so new specialist agents can be loaded without hardcoding every integration. The orchestrator keeps session state, routes work between agents, and supports Human-in-the-Loop pauses when the workflow needs human approval. Specialized agents live in [swarm/agents](swarm/agents) and are responsible for distinct tasks such as financial review, legal analysis, operations evaluation, and brand sentiment analysis.
+
+### 2. MCP Server Integration
+The system includes an MCP-style server implementation in [mcp_servers/edgar_mcp/server.py](mcp_servers/edgar_mcp/server.py). This server exposes tools such as company lookup, financial fact retrieval, and filing discovery, and it speaks over stdio JSON-RPC so that agent workflows can invoke external tools in a structured manner. In practice, the financial agent calls these tools to gather SEC-oriented context before generating its findings.
+
+### 3. Security Features
+Security is implemented as a layered runtime protection model. [security/sandbox.py](security/sandbox.py) runs agent-generated scripts inside an isolated subprocess with a timeout and a temporary scratch workspace. [security/policy_engine.py](security/policy_engine.py) validates code structure with AST-based import checks, blocks dangerous commands, and restricts file writes to an allowlisted directory set. [security/identity.py](security/identity.py) adds a human-readable safety review layer so sensitive actions can be surfaced for explicit confirmation.
+
+### 4. Deployability
+The backend is exposed through [backend/app/main.py](backend/app/main.py), which starts a FastAPI application, registers the core routers, and serves the API for the frontend. The deployment path is also prepared through [Procfile](Procfile) for platform hosting, [frontend/package.json](frontend/package.json) for the Vite frontend build and preview scripts, and [docker-compose.yml](docker-compose.yml) for container-based orchestration. This makes the platform suitable for both local development and hosted deployment.
+
+### 5. Agent Skills / Agents CLI Workflow
+The repository follows a skill-oriented structure by organizing behavior into reusable agent modules, prompt templates, and tool adapters. The prompt layer lives in [swarm/prompt_templates](swarm/prompt_templates), while agent behavior is modularized under [swarm/agents](swarm/agents). This design makes it straightforward to add a new specialist skill, register it with the orchestrator, and expose the same workflow through a future CLI-style interface or additional tooling layer.
+
+---
+
 ## 📂 Project Architecture
 
 ```mermaid
