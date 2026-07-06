@@ -15,6 +15,27 @@ Sebuah platform uji tuntas (*due diligence*) otomatis untuk aktivitas Merger & A
 
 ---
 
+## 🧠 Konsep Kunci yang Dicakup
+
+Platform ini dirancang di sekitar lima konsep utama, dan setiap konsep diimplementasikan secara konkret di dalam repository.
+
+### 1. Agent / Multi-Agent System (ADK)
+Lapisan orkestrasi diimplementasikan di [swarm/orchestrator.py](swarm/orchestrator.py). Sistem ini memakai orchestrator pusat, registri agen dinamis, dan pendeteksian modul agen otomatis sehingga agen spesialis baru dapat dimuat tanpa hardcoding setiap integrasi. Orchestrator juga menjaga state sesi, mengarahkan pekerjaan antar agen, dan mendukung jeda Human-in-the-Loop saat alur kerja memerlukan persetujuan manusia. Agen spesialis berada di [swarm/agents](swarm/agents) dan bertanggung jawab atas tugas seperti review keuangan, analisis hukum, evaluasi operasi, serta analisis sentimen merek.
+
+### 2. Integrasi MCP Server
+Sistem ini memiliki implementasi server berjenis MCP di [mcp_servers/edgar_mcp/server.py](mcp_servers/edgar_mcp/server.py). Server ini mengekspor alat seperti pencarian perusahaan, pengambilan fakta finansial, dan pencarian dokumen filing, lalu berkomunikasi melalui stdio JSON-RPC agar alur agen dapat memanggil alat eksternal secara terstruktur. Dalam praktiknya, agen finansial memanggil alat-alat ini untuk mengumpulkan konteks berbasis SEC sebelum menghasilkan temuan.
+
+### 3. Fitur Keamanan
+Keamanan diimplementasikan sebagai lapisan perlindungan runtime yang bertingkat. [security/sandbox.py](security/sandbox.py) menjalankan skrip yang dibuat agen di dalam subprocess terisolasi dengan batas waktu dan ruang kerja sementara. [security/policy_engine.py](security/policy_engine.py) memvalidasi struktur kode menggunakan pemeriksaan impor berbasis AST, memblokir perintah berbahaya, dan membatasi penulisan file ke jalur yang diizinkan. [security/identity.py](security/identity.py) menambahkan lapisan review aman yang dapat dibaca manusia agar aksi sensitif dapat disajikan untuk persetujuan eksplisit.
+
+### 4. Deployability
+Backend diekspos melalui [backend/app/main.py](backend/app/main.py), yang menjalankan aplikasi FastAPI, mendaftarkan router utama, dan melayani API untuk frontend. Jalur deployment juga sudah dipersiapkan melalui [Procfile](Procfile) untuk hosting platform, [frontend/package.json](frontend/package.json) untuk build dan preview frontend Vite, serta [docker-compose.yml](docker-compose.yml) untuk orkestrasi berbasis kontainer. Hal ini membuat platform cocok untuk pengembangan lokal maupun deployment terhosting.
+
+### 5. Agent Skills / Workflow Agents CLI
+Repository ini mengikuti struktur berorientasi skill dengan mengorganisasikan perilaku ke dalam modul agen yang dapat digunakan ulang, template prompt, dan adaptor alat. Lapisan prompt berada di [swarm/prompt_templates](swarm/prompt_templates), sementara perilaku agen termodularisasi di [swarm/agents](swarm/agents). Desain ini memudahkan penambahan skill spesialis baru, pendaftaran ke orchestrator, dan pemaparan alur kerja yang sama melalui antarmuka CLI-style di masa depan.
+
+---
+
 ## 📂 Arsitektur Proyek
 
 ```mermaid
