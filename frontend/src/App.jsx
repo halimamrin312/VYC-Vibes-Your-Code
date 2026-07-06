@@ -16,6 +16,7 @@ function App() {
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [agentReports, setAgentReports] = useState({});
   const [uploadedOpsLogName, setUploadedOpsLogName] = useState('');
+  const [uploadedLegalFileName, setUploadedLegalFileName] = useState('');
   
   // Track agent states: 'idle', 'running', 'success', 'error'
   const [agentStatus, setAgentStatus] = useState({
@@ -55,6 +56,7 @@ function App() {
     setAccumulatedFlags([]);
     setAgentReports({});
     setUploadedOpsLogName('');
+    setUploadedLegalFileName('');
     setStatusLogs([]);
     setAgentStatus({
       financial_auditor: 'idle',
@@ -381,6 +383,23 @@ function App() {
                 setUploadedOpsLogName(name);
                 setStatusLogs(prev => [...prev, `[INFO] Ingested and verified operations log: ${name}`]);
               }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+            <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500, marginBottom: '4px' }}>Legal Agreements Data Room (PDF/DOCX)</label>
+            <DocumentUploader 
+              sessionId={sessionId}
+              uploadType="legal"
+              accept=".pdf,.docx"
+              label="Drag & Drop PDF/DOCX Contracts"
+              subLabel="or click to browse local files"
+              endpoint="/api/ingest/legal"
+              showSessionId={false}
+              onUploadSuccess={(name) => {
+                setUploadedLegalFileName(name);
+                setStatusLogs(prev => [...prev, `[INFO] Ingested and indexed legal agreement: ${name}`]);
+              }} 
             />
           </div>
 

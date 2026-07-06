@@ -136,3 +136,71 @@ def test_gemini_clause_analyzer_api(mock_genai_client):
     assert len(findings["flags"]) == 1
     assert findings["flags"][0]["lq_id"] == "LQ-01"
     assert findings["flags"][0]["category"] == "Poison Pill / Deal Blocker"
+
+import zipfile
+import io
+from fastapi.testclient import TestClient
+from backend.app.main import app
+
+def _create_dummy_docx(text: str) -> bytes:
+    # A DOCX file is a zip containing word/document.xml
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:body>
+            <w:p>
+                <w:r>
+                    <w:t>{text}</w:t>
+                </w:r>
+            </w:p>
+        </w:body>
+    </w:document>
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as zip_file:
+        zip_file.writestr('word/document.xml', xml_content)
+    return buffer.getvalue()
+
+def test_extract_text_from_docx(tmp_path):
+    from swarm.tools.local_pdf_parser import extract_text_from_docx
+    
+    dummy_text = "This is a contract containing poison pill clause."
+    docx_bytes = _create_dummy_docx(dummy_text)
+    
+    file_path = tmp_path / "test_contract.docx"
+    with open(file_path, "wb") as f:
+        f.write(docx_bytes)
+        
+    extracted_text = extract_text_from_docx(str(file_path))
+    assert dummy_text in extracted_text
+
+def test_ingest_legal_endpoint():
+    client = TestClient(app)
+    
+    # 1. Test invalid file format
+    response = client.post(
+        "/api/ingest/legal",
+        files={"file": ("test.txt", io.BytesIO(b"dummy text"), "text/plain")}
+    )
+    assert response.status_code == 400
+    assert "Only PDF and DOCX files are supported." in response.json()["detail"]
+
+    # 2. Test valid DOCX upload and indexing
+    dummy_text = "This is a legal document with buyout penalty."
+    docx_bytes = _create_dummy_docx(dummy_text)
+    
+    uploaded_file_path = "data_room/uploads/legal/test_legal.docx"
+    
+    with patch("backend.app.routers.ingest.index_document") as mock_index:
+        mock_index.return_value = True
+        try:
+            response = client.post(
+                "/api/ingest/legal",
+                files={"file": ("test_legal.docx", io.BytesIO(docx_bytes), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+            )
+            
+            assert response.status_code == 200
+            assert "Successfully ingested and indexed test_legal.docx" in response.json()["message"]
+            mock_index.assert_called_once()
+        finally:
+            if os.path.exists(uploaded_file_path):
+                os.remove(uploaded_file_path)

@@ -137,14 +137,13 @@ async def ingest_logs(
         "record_count": len(df)
     }
 
-
 @router.post("/legal")
 async def ingest_legal_document(file: UploadFile = File(...)):
     """
-    Ingests a legal PDF document, saves it locally, and indexes it into the local FAISS vector store.
+    Ingests a legal PDF or DOCX document, saves it locally, and indexes it into the local FAISS vector store.
     """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    if not (file.filename.lower().endswith(".pdf") or file.filename.lower().endswith(".docx")):
+        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
     
     upload_dir = "data_room/uploads/legal"
     os.makedirs(upload_dir, exist_ok=True)
